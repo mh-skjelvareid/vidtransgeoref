@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vidtransgeoref"
+version = "0.0.1"
+dependencies = [
+  "pandas",
+  "geopandas",
+  "numpy",
+  "ffmpeg-python",
+  "pyexiftool",
+  "pydantic"
+]
+requires-python = ">=3.10"
+authors = [
+  {name = "Martin H. Skjelvareid"},
+]
+maintainers = [
+  {name = "Martin H. Skjelvareid"}
+]
+description = "Tools for creating georeferenced/geotagged ground truth images by merging video and geolocation data streams."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["transect", "geotagging", "georeferencing", "ground truth"]
+classifiers = [
+  "Programming Language :: Python"
+]
+
+[project.optional-dependencies]
+dev = [
+  "jupyterlab",
+  "pytest",
+  "ruff",
+  "rich",
+  "numpydoc-linter",
+  "mkdocs",
+  "mkdocstrings-python",
+  "mkdocs-material"
+]
+
+[project.urls]
+Repository = "https://github.com/mh-skjelvareid/vidtransgeoref"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "I"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 88
