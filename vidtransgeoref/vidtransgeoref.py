@@ -1,23 +1,25 @@
 # Imports
-import ffmpeg
-import pandas as pd
-import geopandas
-import warnings
-import numpy as np
 import datetime
-from pathlib import Path
-from tqdm import tqdm
-import exiftool
 import shutil
+import warnings
+from pathlib import Path
+
+import exiftool
+import ffmpeg
+import geopandas
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
 # Suppress "future" warnings (issue with shapely / geopandas)
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 # Note: Also check out batch geotegging of images
 # https://help.propelleraero.com/hc/en-us/articles/19384091245719-How-to-Batch-Geotag-Photos-with-ExifTool
 
-def image_from_video(video_input_file,image_output_file, time, image_quality=5, overwrite=True):
-    """ Extract image from video at given time
+
+def image_from_video(video_input_file, image_output_file, time, image_quality=5, overwrite=True):
+    """Extract image from video at given time
 
     # Usage:
     image_from_video(video_input_file,image_output_file, time)
@@ -39,9 +41,14 @@ def image_from_video(video_input_file,image_output_file, time, image_quality=5, 
 
     try:
         out, _ = (
-            ffmpeg
-            .input(video_input_file,ss=time)
-            .output(image_output_file, vframes=1, format='image2', vcodec='mjpeg', **{'q:v': image_quality}) # Consider cutting the q:v parameter?
+            ffmpeg.input(video_input_file, ss=time)
+            .output(
+                image_output_file,
+                vframes=1,
+                format="image2",
+                vcodec="mjpeg",
+                **{"q:v": image_quality},
+            )  # Consider cutting the q:v parameter?
             .run(capture_stdout=True, capture_stderr=True, overwrite_output=overwrite)
         )
     except ffmpeg.Error as e:
@@ -49,7 +56,7 @@ def image_from_video(video_input_file,image_output_file, time, image_quality=5, 
 
 
 def track_csv_to_geodataframe(csv_file):
-    """ Read position and timestamp from CSV file, convert to geodataframe
+    """Read position and timestamp from CSV file, convert to geodataframe
 
     # Usage:
     track_csv_to_geodataframe(csv_file)
@@ -66,24 +73,23 @@ def track_csv_to_geodataframe(csv_file):
     """
 
     # Read file (only position and timestamp)
-    data = pd.read_csv(csv_file, usecols=['Lat','Lng','Time'])
+    data = pd.read_csv(csv_file, usecols=["Lat", "Lng", "Time"])
 
     # Convert time string to datetime format, and add column with time differences
-    data['Time'] = pd.to_datetime(data['Time'])
-    data['TimeDiffSec'] = pd.to_timedelta(data['Time'] - data['Time'][0]).dt.total_seconds()
+    data["Time"] = pd.to_datetime(data["Time"])
+    data["TimeDiffSec"] = pd.to_timedelta(data["Time"] - data["Time"][0]).dt.total_seconds()
 
     # Create GeoDataFrame
     gdf = geopandas.GeoDataFrame(
-        data,
-        crs = 'EPSG:4326',
-        geometry=geopandas.points_from_xy(data.Lng, data.Lat))
+        data, crs="EPSG:4326", geometry=geopandas.points_from_xy(data.Lng, data.Lat)
+    )
 
     # Return
     return gdf
 
 
 def otter_csv_to_geodataframe(csv_file):
-    """ Read position and timestamp from Otter CSV file
+    """Read position and timestamp from Otter CSV file
 
     # Usage:
     otter_csv_to_geodataframe(csv_file)
@@ -100,22 +106,21 @@ def otter_csv_to_geodataframe(csv_file):
     """
 
     # Read data
-    data = pd.read_csv(csv_file,usecols=['LatDecDeg','LongDecDeg','GnssUTC'])
-    data.columns = ['Time','Lat','Lng']                   # Rename columns
-    data.Time = pd.to_datetime(data.Time,utc=True)        # Convert time string to datetime format
+    data = pd.read_csv(csv_file, usecols=["LatDecDeg", "LongDecDeg", "GnssUTC"])
+    data.columns = ["Time", "Lat", "Lng"]  # Rename columns
+    data.Time = pd.to_datetime(data.Time, utc=True)  # Convert time string to datetime format
 
     # Create GeoDataFrame
     gdf = geopandas.GeoDataFrame(
-        data,
-        crs = 'EPSG:4326',
-        geometry=geopandas.points_from_xy(data.Lng, data.Lat))
+        data, crs="EPSG:4326", geometry=geopandas.points_from_xy(data.Lng, data.Lat)
+    )
 
     # Return
     return gdf
 
 
-def yx_csv_to_geodataframe(csv_file,time_column_name='Time'):
-    """ Read position and timestamp from "YX" CSV file (e.g. exported from QGIS)
+def yx_csv_to_geodataframe(csv_file, time_column_name="Time"):
+    """Read position and timestamp from "YX" CSV file (e.g. exported from QGIS)
 
     # Usage:
     xy_csv_to_geodataframe(csv_file)
@@ -135,22 +140,21 @@ def yx_csv_to_geodataframe(csv_file,time_column_name='Time'):
     """
 
     # Read data
-    data = pd.read_csv(csv_file,usecols=['Y','X',time_column_name])
-    data.columns = ['Lat','Lng','Time']                   # Rename columns
-    data.Time = pd.to_datetime(data.Time,utc=True)        # Convert time string to datetime format
+    data = pd.read_csv(csv_file, usecols=["Y", "X", time_column_name])
+    data.columns = ["Lat", "Lng", "Time"]  # Rename columns
+    data.Time = pd.to_datetime(data.Time, utc=True)  # Convert time string to datetime format
 
     # Create GeoDataFrame
     gdf = geopandas.GeoDataFrame(
-        data,
-        crs = 'EPSG:4326',
-        geometry=geopandas.points_from_xy(data.Lng, data.Lat))
+        data, crs="EPSG:4326", geometry=geopandas.points_from_xy(data.Lng, data.Lat)
+    )
 
     # Return
     return gdf
 
 
 def sec_to_timestring(sec):
-    """ Convert number of seconds (numeric) into formatted string with minutes
+    """Convert number of seconds (numeric) into formatted string with minutes
 
     # Usage:
     timestring = sec_to_timestring(sec)
@@ -165,15 +169,20 @@ def sec_to_timestring(sec):
     sec_to_timestring(367.86) returns '06m07s860ms'
 
     """
-    sec_td = datetime.timedelta(seconds = sec)
-    timestring = (str(sec_td.seconds//60).zfill(2) + 'm'
-                  + str(np.mod(sec_td.seconds,60)).zfill(2) + 's'
-                  + str(sec_td.microseconds//1000).zfill(3) + 'ms')
+    sec_td = datetime.timedelta(seconds=sec)
+    timestring = (
+        str(sec_td.seconds // 60).zfill(2)
+        + "m"
+        + str(np.mod(sec_td.seconds, 60)).zfill(2)
+        + "s"
+        + str(sec_td.microseconds // 1000).zfill(3)
+        + "ms"
+    )
     return timestring
 
 
-def get_video_data(video_dir, tz='Europe/Oslo',video_time_offset = pd.Timedelta(0)):
-    """ Get info about videos in folder, organized as dataframe
+def get_video_data(video_dir, tz="Europe/Oslo", video_time_offset=pd.Timedelta(0)):
+    """Get info about videos in folder, organized as dataframe
 
     # Usage:
     video_data = get_video_data(video_dir)
@@ -183,13 +192,13 @@ def get_video_data(video_dir, tz='Europe/Oslo',video_time_offset = pd.Timedelta(
                     Files are assumed to be from a single continuous "take",
                     split into files with names ordered alphabetiacally
                     according to recording order.
-    
+
     # Keyword arguments:
     tz                  Timezone for video. Default: 'Europe/Oslo'
                         To see available options:
                         > import pytz
                         > print(pytz.common_timezones)
-    video_time_offset:  Time offset (pandas.Timedelta) to add to times 
+    video_time_offset:  Time offset (pandas.Timedelta) to add to times
                         extracted from video files.
                         If a time is e.g. 15:00 and should be 16:00,
                         set video_time_offset = pandas.Timedelta(hours=1)
@@ -201,41 +210,48 @@ def get_video_data(video_dir, tz='Europe/Oslo',video_time_offset = pd.Timedelta(
 
     """
 
-    video_data = pd.DataFrame({ 'FileName':'',
-                                'CreationTime':pd.Timestamp(0,tz=tz),
-                                'DurationSec':float(),
-                                'StartTimeSec':float(),
-                                'StopTimeSec':float()},
-                                 index=[])
+    video_data = pd.DataFrame(
+        {
+            "FileName": "",
+            "CreationTime": pd.Timestamp(0, tz=tz),
+            "DurationSec": float(),
+            "StartTimeSec": float(),
+            "StopTimeSec": float(),
+        },
+        index=[],
+    )
 
     # Get list of video files, insert into dataframe
     # Use brackets to find both .mp4 and .MP4 files
     # TODO: Re-implmenent using pathlib.Path.glob()
-    video_data.FileName = misc.file_pattern_search(video_dir, '*.[Mm][Pp]4')
+    video_data.FileName = misc.file_pattern_search(video_dir, "*.[Mm][Pp]4")
 
     # Get creation time, duration and frame rate for each video file
     # Keep times timezone naive
-    for ii,file in enumerate(video_data['FileName']):
+    for ii, file in enumerate(video_data["FileName"]):
         probe_data = ffmpeg.probe(file)
-        video_data.loc[ii,'CreationTime'] = pd.to_datetime( \
-            probe_data['streams'][0]['tags']['creation_time']). \
-            tz_localize(None).tz_localize(tz) + video_time_offset # "Reset" to no timezone, then set timezone. Add offset.
-        video_data.loc[ii,'DurationSec'] = pd.to_numeric(probe_data['streams'][0]['duration'])
-    
+        video_data.loc[ii, "CreationTime"] = (
+            pd.to_datetime(probe_data["streams"][0]["tags"]["creation_time"])
+            .tz_localize(None)
+            .tz_localize(tz)
+            + video_time_offset
+        )  # "Reset" to no timezone, then set timezone. Add offset.
+        video_data.loc[ii, "DurationSec"] = pd.to_numeric(probe_data["streams"][0]["duration"])
+
     # Calculate start and stop times for each video in seconds, relative to start of video
     # Note that columns.get_loc() needs to be used below in order to access dataframs
     # by integer indices only.
-    video_data.loc[0,'StartTimeSec'] = 0.0
-    video_data.iloc[1:,video_data.columns.get_loc('StartTimeSec')] = np.cumsum(
-        video_data.iloc[:-1,video_data.columns.get_loc('DurationSec')])
+    video_data.loc[0, "StartTimeSec"] = 0.0
+    video_data.iloc[1:, video_data.columns.get_loc("StartTimeSec")] = np.cumsum(
+        video_data.iloc[:-1, video_data.columns.get_loc("DurationSec")]
+    )
     video_data.StopTimeSec = video_data.StartTimeSec + video_data.DurationSec
 
     return video_data
 
 
-
-def prepare_gdf_with_video_data(gdf,video_data, video_offset_sec=0.0):
-    """ Insert video information into geodataframe, prepare for extracting images
+def prepare_gdf_with_video_data(gdf, video_data, video_offset_sec=0.0):
+    """Insert video information into geodataframe, prepare for extracting images
 
     # Usage:
     gdf = prepare_gdf_with_video_data(gdf,video_data)
@@ -245,10 +261,10 @@ def prepare_gdf_with_video_data(gdf,video_data, video_offset_sec=0.0):
                 (see track_csv_to_geodataframe())
     video_data: dataframe with video data
                 (see get_video_data())
-    
+
     # Keyword arguments:
     video_offset_sec:     number of seconds time difference between
-                          video datetime (based on "CreationTime") and 
+                          video datetime (based on "CreationTime") and
                           GNSS track datetime. Default: 0.
 
     # Returns
@@ -257,35 +273,41 @@ def prepare_gdf_with_video_data(gdf,video_data, video_offset_sec=0.0):
 
     # Create copy of original geodataframe
     gdf = gdf.copy()
-    
+
     # Insert additional columns
-    gdf.insert(gdf.shape[1]-1,'VideoFile','')
-    gdf.insert(gdf.shape[1]-1,'TimeRelToVideoStart',pd.Timedelta(0))
-    gdf.insert(gdf.shape[1]-1,'TimeRelToFileStartSec',float())
-    
+    gdf.insert(gdf.shape[1] - 1, "VideoFile", "")
+    gdf.insert(gdf.shape[1] - 1, "TimeRelToVideoStart", pd.Timedelta(0))
+    gdf.insert(gdf.shape[1] - 1, "TimeRelToFileStartSec", float())
+
     # Calculate time for logged positions relative to video
-    gdf.TimeRelToVideoStart = gdf.Time - (video_data.iloc[0].CreationTime - pd.Timedelta(seconds=video_offset_sec))
-    
+    gdf.TimeRelToVideoStart = gdf.Time - (
+        video_data.iloc[0].CreationTime - pd.Timedelta(seconds=video_offset_sec)
+    )
+
     # Exclude positions outside video time window
     ind_within_video_duration = (gdf.TimeRelToVideoStart >= pd.Timedelta(0)) & (
-                                 gdf.TimeRelToVideoStart <= pd.Timedelta(seconds=video_data.iloc[-1].StopTimeSec))
+        gdf.TimeRelToVideoStart <= pd.Timedelta(seconds=video_data.iloc[-1].StopTimeSec)
+    )
     gdf = gdf[ind_within_video_duration]
 
     # For each position, find corresponding video file and calculate time relative to start of video
     for ii in range(video_data.shape[0]):
         # Create index for rows within current video time window
-        ind = (gdf.TimeRelToVideoStart >= pd.Timedelta(seconds=video_data.iloc[ii].StartTimeSec)) & (
-               gdf.TimeRelToVideoStart < pd.Timedelta(seconds=video_data.iloc[ii].StopTimeSec))
-        # Set video file and times for current video 
-        gdf.loc[ind, 'VideoFile'] = video_data.iloc[ii].FileName
-        time_rel_to_file_start = gdf.loc[ind, 'TimeRelToVideoStart'] - pd.Timedelta(seconds=video_data.iloc[ii].StartTimeSec)
-        gdf.loc[ind, 'TimeRelToFileStartSec'] = time_rel_to_file_start.dt.total_seconds() 
-        
+        ind = (
+            gdf.TimeRelToVideoStart >= pd.Timedelta(seconds=video_data.iloc[ii].StartTimeSec)
+        ) & (gdf.TimeRelToVideoStart < pd.Timedelta(seconds=video_data.iloc[ii].StopTimeSec))
+        # Set video file and times for current video
+        gdf.loc[ind, "VideoFile"] = video_data.iloc[ii].FileName
+        time_rel_to_file_start = gdf.loc[ind, "TimeRelToVideoStart"] - pd.Timedelta(
+            seconds=video_data.iloc[ii].StartTimeSec
+        )
+        gdf.loc[ind, "TimeRelToFileStartSec"] = time_rel_to_file_start.dt.total_seconds()
+
     return gdf
 
 
-def extract_images_from_video(gdf,image_dir):
-    """ Extract images from video transect
+def extract_images_from_video(gdf, image_dir):
+    """Extract images from video transect
 
     # Usage:
     gdf = extract_images_from_video(gdf,image_dir)
@@ -301,35 +323,39 @@ def extract_images_from_video(gdf,image_dir):
 
     # Create copy to avoid changing original geodataframe
     gdf = gdf.copy()
-    
+
     # Convert datetimes and timedeltas to strings (needed to save as GPKG)
-    gdf.Time = gdf.Time.dt.strftime('%Y-%m-%d %H:%M:%S.%f%z')
+    gdf.Time = gdf.Time.dt.strftime("%Y-%m-%d %H:%M:%S.%f%z")
     gdf.TimeRelToVideoStart = gdf.TimeRelToVideoStart.astype(str)
-    
+
     # Insert additional column for image path
-    gdf.insert(gdf.shape[1]-1,'ImageFile','')
+    gdf.insert(gdf.shape[1] - 1, "ImageFile", "")
 
     # Loop over every row, create image and save image file name
-    for ii in tqdm(range(len(gdf))):    # Use tqdm to display progress bar
+    for ii in tqdm(range(len(gdf))):  # Use tqdm to display progress bar
         # Create file name and log it to the geodataframe
-        image_file_name = Path(gdf.iloc[ii].VideoFile).stem + '_' + \
-                           sec_to_timestring(gdf.iloc[ii].TimeRelToFileStartSec) + '.jpg'
-        gdf.iloc[ii, gdf.columns.get_loc('ImageFile')] = str(image_file_name)  # Must use get_loc for "mixed" indexing with ints and names
-        
+        image_file_name = (
+            Path(gdf.iloc[ii].VideoFile).stem
+            + "_"
+            + sec_to_timestring(gdf.iloc[ii].TimeRelToFileStartSec)
+            + ".jpg"
+        )
+        gdf.iloc[ii, gdf.columns.get_loc("ImageFile")] = str(
+            image_file_name
+        )  # Must use get_loc for "mixed" indexing with ints and names
+
         # Create absolute path
-        abs_path = Path(image_dir,image_file_name)
+        abs_path = Path(image_dir, image_file_name)
 
         # Extract image from video and save
-        image_from_video(gdf.iloc[ii].VideoFile,
-                            str(abs_path),
-                            gdf.iloc[ii].TimeRelToFileStartSec)
+        image_from_video(gdf.iloc[ii].VideoFile, str(abs_path), gdf.iloc[ii].TimeRelToFileStartSec)
 
     return gdf
 
 
-def filter_gdf_on_distance(gdf,sample_distance,epsg=32633, outlier_distance = 1000):
-    """ Filter a geodataframe by only including new samples if position has changed
-    
+def filter_gdf_on_distance(gdf, sample_distance, epsg=32633, outlier_distance=1000):
+    """Filter a geodataframe by only including new samples if position has changed
+
     # Usage:
     gdf_filtered = filter_gdf_on_distance(gdf,...)
 
@@ -337,63 +363,68 @@ def filter_gdf_on_distance(gdf,sample_distance,epsg=32633, outlier_distance = 10
     gdf:                  GeoPandas GeoDataFrame object
     sample_distance       Minimum change in position in order for next sample to be included
                           Units are defined by CRS (set as EPSG code, see kwarg epsg)
-    
+
     # Keyword arguments:
     epsg:                EPSG code (integer) for CRS to measure distance in
                          Default: 32633 (UTM 33N)
                          If epsg=None, the existing CRS for the geodataframe is used
     outlier_distance     Samples with changes in distance above this limit are not included
                          Units are defined by CRS
-    
+
     """
-    
+
     # Convert CRS (often necessary to get valid distance units, e.g. meters)
     if epsg is not None:
         geom = gdf.geometry.to_crs(epsg=epsg)
     else:
         geom = gdf.geometry
-        
-    # Iterate over all positions, and only include a new point if position 
+
+    # Iterate over all positions, and only include a new point if position
     # has changed more than sample_distance
-    mask = [0]              # Always include first point
-    last_pos = geom.iloc[0] # Position at first point
+    mask = [0]  # Always include first point
+    last_pos = geom.iloc[0]  # Position at first point
     for index, position in enumerate(geom):
         dist = position.distance(last_pos)
         if (dist > sample_distance) and (dist < outlier_distance):
             mask.append(index)
             last_pos = position
-    
+
     # Return a filtered copy of the original geodataframe
     return gdf.iloc[mask]
 
 
 def get_image_timestamps(image_paths):
-    """ Get subsecond-accuracy timestamps for every image file in a list
-    
+    """Get subsecond-accuracy timestamps for every image file in a list
+
     # Input parameters:
     image_paths:
         List of image paths, used by exiftool method ExifToolHelper.get_metadata()
-    
+
     # Returns:
     image_paths_and_timestamps:
         List of tuples containing (image_path, image_timestamp_string)
     """
     with exiftool.ExifToolHelper(check_execute=False) as et:
         metadata = et.get_metadata(image_paths)
-    image_paths_and_timestamps = [(im_path,md['Composite:SubSecCreateDate']) 
-                                  for (im_path,md) in zip(image_paths,metadata) 
-                                  if 'Composite:SubSecCreateDate' in md]
+    image_paths_and_timestamps = [
+        (im_path, md["Composite:SubSecCreateDate"])
+        for (im_path, md) in zip(image_paths, metadata)
+        if "Composite:SubSecCreateDate" in md
+    ]
     return image_paths_and_timestamps
 
 
-def get_otter_image_positions(otter_gdf,image_paths_and_timestamps,
-                              dt_format = r'%Y:%m:%d %H:%M:%S.%f',
-                              time_tolerance = datetime.timedelta(seconds=1),
-                              image_time_offset_from_utc = datetime.timedelta(hours=2)):
-    """ Search Otter geodataframe for positions closest to image (in time)
-    
+def get_otter_image_positions(
+    otter_gdf,
+    image_paths_and_timestamps,
+    dt_format=r"%Y:%m:%d %H:%M:%S.%f",
+    time_tolerance=datetime.timedelta(seconds=1),
+    image_time_offset_from_utc=datetime.timedelta(hours=2),
+):
+    """Search Otter geodataframe for positions closest to image (in time)
+
     # Input arguments:
-    otter_gdf:      
+    otter_gdf:
         GDF created from Otter CSV (see otter_csv_to_geodataframe())
         Only column "Time" (containing UTC datetime objects) is used
     image_paths_and_timestamps:
@@ -404,41 +435,47 @@ def get_otter_image_positions(otter_gdf,image_paths_and_timestamps,
     image_time_offset_from_utc:
         datetime.timedelta, default 2 hours, indicating time offset between
         utc and image timestamps (typically local time).
-    
+
     # Returns
     image_gdf:
         Geodataframe with positions (taken form Otter) and corresponding
-        image file paths. 
-    
+        image file paths.
+
     """
-    
+
     # Extract timestamps and convert to datetime objects
-    image_datetimes = [pd.to_datetime(image_datetime_str,format=dt_format,utc=True) 
-                       - image_time_offset_from_utc
-                       for (_,image_datetime_str) in image_paths_and_timestamps]
+    image_datetimes = [
+        pd.to_datetime(image_datetime_str, format=dt_format, utc=True) - image_time_offset_from_utc
+        for (_, image_datetime_str) in image_paths_and_timestamps
+    ]
 
     # Find indices for Otter timestamps that are closest to image timestamps
-    closest_time_index = pd.Index(otter_gdf['Time']).get_indexer(image_datetimes,method='nearest',
-                                                                 tolerance=time_tolerance)
-    
+    closest_time_index = pd.Index(otter_gdf["Time"]).get_indexer(
+        image_datetimes, method="nearest", tolerance=time_tolerance
+    )
+
     # Remove images that don't have any matches within the time tolerance
-    image_paths = [image_path for ((image_path,_),im_index) in 
-                   zip(image_paths_and_timestamps,closest_time_index)
-                   if im_index >= 0] # Images without match get index -1
-    closest_time_index = closest_time_index[closest_time_index>=0]
+    image_paths = [
+        image_path
+        for ((image_path, _), im_index) in zip(image_paths_and_timestamps, closest_time_index)
+        if im_index >= 0
+    ]  # Images without match get index -1
+    closest_time_index = closest_time_index[closest_time_index >= 0]
 
     # Create copy of Otter gdf which only contains rows corresponding to images
     image_gdf = otter_gdf.iloc[closest_time_index]
-    
+
     # Insert additional column for image path
-    image_gdf.insert(image_gdf.shape[1]-1,'ImageFile','')
-    image_gdf.iloc[:,image_gdf.columns.get_loc('ImageFile')] = image_paths
+    image_gdf.insert(image_gdf.shape[1] - 1, "ImageFile", "")
+    image_gdf.iloc[:, image_gdf.columns.get_loc("ImageFile")] = image_paths
     return image_gdf
 
 
-def copy_rename_georeferenced_images(gdf,output_dir,image_filename_base,include_full_path_in_gdf=False):
-    """ Copy and rename image files in geodataframe
-    
+def copy_rename_georeferenced_images(
+    gdf, output_dir, image_filename_base, include_full_path_in_gdf=False
+):
+    """Copy and rename image files in geodataframe
+
     # Arguments:
     gdf:
         GeoDataFrame with columns "Time" (datetime) and "ImageFile" (pathlib.Path)
@@ -465,26 +502,28 @@ def copy_rename_georeferenced_images(gdf,output_dir,image_filename_base,include_
     im_paths = gdf.ImageFile
     im_times = gdf.Time
     new_image_filenames = []
-    for i,(im_path,im_time) in enumerate(zip(im_paths,im_times)):
+    for i, (im_path, im_time) in enumerate(zip(im_paths, im_times)):
         new_image_filename = image_filename_base
-        new_image_filename += f'{i:08d}_'
+        new_image_filename += f"{i:08d}_"
         new_image_filename += im_time.strftime("%Y%m%dT%H%M%SZ_")
         new_image_filename += im_path.name
         new_image_filenames.append(new_image_filename)
 
     # Create output directory (if not already present), copy and rename files
-    output_dir.mkdir(exist_ok=True,parents=True)
-    print(f'Renaming and copying {len(new_image_filenames)} files to {output_dir}...')
-    for source_file,new_filename in tqdm(zip(gdf.ImageFile,new_image_filenames)):
+    output_dir.mkdir(exist_ok=True, parents=True)
+    print(f"Renaming and copying {len(new_image_filenames)} files to {output_dir}...")
+    for source_file, new_filename in tqdm(zip(gdf.ImageFile, new_image_filenames)):
         destination_file = output_dir / new_filename
-        shutil.copy(source_file,destination_file)
+        shutil.copy(source_file, destination_file)
 
     # Update path to image in geodataframe
     updated_gdf = gdf.copy()
     if include_full_path_in_gdf:
-        full_new_image_filenames = [str(output_dir / new_image_filename) for 
-                                    new_image_filename in new_image_filenames]
-        updated_gdf.iloc[:,updated_gdf.columns.get_loc('ImageFile')] = full_new_image_filenames
+        full_new_image_filenames = [
+            str(output_dir / new_image_filename) for new_image_filename in new_image_filenames
+        ]
+        updated_gdf.iloc[:, updated_gdf.columns.get_loc("ImageFile")] = full_new_image_filenames
     else:
-        updated_gdf.iloc[:,updated_gdf.columns.get_loc('ImageFile')] = new_image_filenames
+        updated_gdf.iloc[:, updated_gdf.columns.get_loc("ImageFile")] = new_image_filenames
+    return updated_gdf
     return updated_gdf
