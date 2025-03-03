@@ -5,10 +5,8 @@ from exiftool import constants
 
 from vidtransgeotag import VidTransGeoTag
 
-# Set the default executable to the .bat file
+# Set exiftool default executable to .bat version (installed via conda)
 constants.DEFAULT_EXECUTABLE = "exiftool.bat"
-
-# ...existing code...
 
 # Paths
 data_dir = Path("../example_data/example_input/2025-03-01_143053_BodoVidTransTest.csv")
