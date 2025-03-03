@@ -402,9 +402,7 @@ class VidTransGeoTag:
             print(e.stderr.decode())
             raise
 
-
-
-    def rename_image_files_with_timestamp(
+    def _rename_image_files_with_timestamp(
         self, image_files: list[Path], video_name: str, image_times: pd.Series[datetime.timedelta]
     ):
         """Rename image files with video name and timestamp.
@@ -490,7 +488,7 @@ class VidTransGeoTag:
             )
 
         # Rename image files with video name and timestamp
-        renamed_image_files = self.rename_image_files_with_timestamp(
+        renamed_image_files = self._rename_image_files_with_timestamp(
             image_files, video_path.stem, image_time_relative_to_video_start
         )
 

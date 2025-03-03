@@ -8,7 +8,7 @@ UNDER DEVELOPMENT - NOT READY FOR END USERS
 The module requires FFMPEG and ExifTool to be installed on your system. One way to install
 these is via Conda:
 
-    conda create -n vidtransgeotag -c conda-forge python=3.10 ffmpeg exiftool
+    conda create -n vidtransgeotag -c conda-forge python=3.12 ffmpeg exiftool
 
 Activate the environment afterwards:
 
