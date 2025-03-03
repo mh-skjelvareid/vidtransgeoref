@@ -106,8 +106,12 @@ class VidTransGeoTag:
         if not time_col:
             raise ValueError("Time column not found in CSV file.")
 
-        # Convert time column to datetime
+        # Convert to datetime
         df[time_col] = pd.to_datetime(df[time_col])
+        # Handle both timezone-aware and naive datetimes
+        df[time_col] = df[time_col].apply(
+            lambda x: x.tz_convert("UTC") if x.tzinfo else x.tz_localize("UTC")
+        )
 
         # Add offset if specified
         if self.csv_time_add_offset:
@@ -126,7 +130,7 @@ class VidTransGeoTag:
         return gdf
 
     def get_video_creation_time(self, video_path: Path) -> datetime.datetime:
-        """Extract video creation time from metadata.
+        """Extract video creation time from metadata, including timezone if available.
 
         This function uses ExifTool to extract the video creation timestamp from various metadata
         fields, checking multiple tags in order of reliability.
@@ -139,7 +143,7 @@ class VidTransGeoTag:
         Returns
         -------
         datetime.datetime
-            The creation time of the video as a datetime object
+            The creation time of the video as a datetime object, timezone-aware if available
 
         Raises
         ------
@@ -153,6 +157,11 @@ class VidTransGeoTag:
             2. EXIF:DateTimeOriginal
             3. QuickTime:MediaCreateDate
             4. File:FileCreateDate
+
+        And these timezone tags:
+            1. QuickTime:CreateDateTZ
+            2. EXIF:OffsetTimeOriginal
+            3. QuickTime:MediaCreateDateTZ
         """
         with exiftool.ExifToolHelper() as et:
             metadata = et.get_metadata(str(video_path))[0]
@@ -165,8 +174,18 @@ class VidTransGeoTag:
                 or metadata.get("File:FileCreateDate")
             )
 
+            # Try to get timezone information
+            tz_str = (
+                metadata.get("QuickTime:CreateDateTZ")
+                or metadata.get("EXIF:OffsetTimeOriginal")
+                or metadata.get("QuickTime:MediaCreateDateTZ")
+            )
+
             if creation_time_str:
                 try:
+                    # If timezone info exists, append it to the datetime string
+                    if tz_str:
+                        creation_time_str = f"{creation_time_str}{tz_str}"
                     return parser.parse(creation_time_str)
                 except parser.ParserError:
                     raise ValueError(f"Unrecognized date format: {creation_time_str}")
@@ -266,6 +285,28 @@ class VidTransGeoTag:
         # Return a filtered copy of the original geodataframe
         return gdf.iloc[mask]
 
+    def _normalize_datetime(self, dt: datetime.datetime) -> datetime.datetime:
+        """Normalize datetime to UTC if timezone aware, or add UTC if naive.
+
+        Parameters
+        ----------
+        dt : datetime.datetime or pandas.Timestamp
+            The datetime object to normalize
+
+        Returns
+        -------
+        datetime.datetime
+            Normalized datetime object in UTC
+        """
+        if isinstance(dt, pd.Timestamp):
+            if dt.tz is None:
+                return dt.tz_localize("UTC")
+            return dt.tz_convert("UTC")
+
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc)
+
     def check_video_overlaps_track(self, video_path: Path, verbose: bool = False) -> bool:
         """Check if video timestamps overlap with track timestamps.
 
@@ -286,12 +327,12 @@ class VidTransGeoTag:
             True if video timestamps overlap with track timestamps, False otherwise
 
         """
-        video_start_time = self.get_video_creation_time(video_path)
-        video_end_time = video_start_time + datetime.timedelta(
-            seconds=self.get_video_duration(video_path)
+        video_start_time = self._normalize_datetime(self.get_video_creation_time(video_path))
+        video_end_time = self._normalize_datetime(
+            video_start_time + datetime.timedelta(seconds=self.get_video_duration(video_path))
         )
-        track_start_time = self.track_gdf.time.min()
-        track_end_time = self.track_gdf.time.max()
+        track_start_time = self._normalize_datetime(self.track_gdf.time.min())
+        track_end_time = self._normalize_datetime(self.track_gdf.time.max())
 
         if verbose:
             print(f"{video_path.name} starts at {video_start_time} and ends at {video_end_time}.")
