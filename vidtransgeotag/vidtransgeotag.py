@@ -73,7 +73,18 @@ class VidTransGeoTag:
 
         # Define plausible names for latitude, longitude, and time columns
         plausible_lat_names = ["latitude", "lat", "y", "Latitude", "Lat", "Y"]
-        plausible_lon_names = ["longitude", "lon", "x", "Longitude", "Lon", "X"]
+        plausible_lon_names = [
+            "longitude",
+            "lon",
+            "long",
+            "lng",
+            "x",
+            "Longitude",
+            "Lon",
+            "Long",
+            "Lng",
+            "X",
+        ]
         plausible_time_names = ["time", "timestamp", "datetime", "Time", "Timestamp", "Datetime"]
 
         # Determine the column names for latitude, longitude, and time
@@ -104,7 +115,7 @@ class VidTransGeoTag:
 
         # Create a GeoDataFrame using latitude and longitude as geometry
         gdf = geopandas.GeoDataFrame(
-            df[time_col],
+            df[[time_col]],
             geometry=geopandas.points_from_xy(df[lon_col], df[lat_col]),
             crs="EPSG:4326",
         )
@@ -279,8 +290,8 @@ class VidTransGeoTag:
         video_end_time = video_start_time + datetime.timedelta(
             seconds=self.get_video_duration(video_path)
         )
-        track_start_time = self.track_gdf["time"].min()
-        track_end_time = self.track_gdf["time"].max()
+        track_start_time = self.track_gdf.time.min()
+        track_end_time = self.track_gdf.time.max()
 
         if verbose:
             print(f"{video_path.name} starts at {video_start_time} and ends at {video_end_time}.")
@@ -316,10 +327,10 @@ class VidTransGeoTag:
         video_duration = datetime.timedelta(seconds=self.get_video_duration(video_path))
 
         # Filter GeoDataFrame to only include rows within video time window
-        mask = (self.track_gdf["time"] >= video_start_time) & (
-            self.track_gdf["time"] <= (video_start_time + video_duration)
+        mask = (self.track_gdf.time >= video_start_time) & (
+            self.track_gdf.time <= (video_start_time + video_duration)
         )
-        overlapping_gdf = self.track_gdf[mask]
+        overlapping_gdf = geopandas.GeoDataFrame(self.track_gdf[mask], crs=self.track_gdf.crs)
 
         return overlapping_gdf
 
@@ -403,13 +414,9 @@ class VidTransGeoTag:
             raise
 
     def _rename_image_files_with_timestamp(
-        self, image_files: list[Path], video_name: str, image_times: pd.Series[datetime.timedelta]
-    ):
+        self, image_files: list[Path], video_name: str, image_times: "pd.TimedeltaIndex"
+    ) -> list[Path]:
         """Rename image files with video name and timestamp.
-
-        This function renames a list of image files using the video name and
-        corresponding timestamps. The new filename format is:
-        {video_name}_{minutes}m{seconds}s{milliseconds}ms.{original_extension}
 
         Parameters
         ----------
@@ -417,30 +424,24 @@ class VidTransGeoTag:
             List of Path objects pointing to image files to be renamed
         video_name : str
             Name of the video file to use in the new filenames
-        image_times : pd.Series[datetime.timedelta]
-            Series of timedelta objects containing timestamps for each image
+        image_times : pd.TimedeltaIndex
+            TimedeltaIndex containing timestamps for each image
 
         Returns
         -------
-        None
-
-        Notes
-        -----
-        - Original files are moved/renamed in place
-        - Timestamps are formatted as MMMmSSsMMMs where:
-            - MMM = minutes (zero-padded to 3 digits)
-            - SS = seconds (zero-padded to 2 digits)
-            - MMM = milliseconds (zero-padded to 3 digits)
+        list[Path]
+            List of renamed image file paths
         """
         new_image_files = []
         for image_file, image_time in zip(image_files, image_times):
+            # Convert pandas Timedelta to total seconds
             total_seconds = image_time.total_seconds()
             minutes = int(total_seconds // 60)
             seconds = int(total_seconds % 60)
             milliseconds = int((total_seconds % 1) * 1000)
 
             time_string = f"{minutes:03d}m{seconds:02d}s{milliseconds:03d}ms"
-            new_image_file = image_file.parent / f"{video_name}_{time_string}.{image_file.suffix}"
+            new_image_file = image_file.parent / f"{video_name}_{time_string}{image_file.suffix}"
             shutil.move(image_file, new_image_file)
             new_image_files.append(new_image_file)
         return new_image_files
@@ -467,17 +468,17 @@ class VidTransGeoTag:
 
         # Get timestamps overlapping with video duration
         track_gdf_within_video = self.get_track_points_within_video(video_path)
-        track_timestamps = track_gdf_within_video["time"]
+        track_timestamps = track_gdf_within_video.time
 
         # Calculate image times (in seconds) relative to video start time
         video_start_time = self.get_video_creation_time(video_path)
-        image_time_relative_to_video_start = track_timestamps - video_start_time
+        image_time_relative_to_video_start = pd.TimedeltaIndex(track_timestamps - video_start_time)
 
         # Extract images at overlapping timestamps
         image_output_template = image_output_folder / "image_%06d.jpg"
         image_files = self.images_from_video(
             video_path,
-            times=image_time_relative_to_video_start.dt.total_seconds(),
+            times=image_time_relative_to_video_start.total_seconds(),
             image_output_template=image_output_template,
         )
 
@@ -522,7 +523,7 @@ class VidTransGeoTag:
         Returns
         -------
         geopandas.GeoDataFrame
-            Combined GeoDataFrame containing all extracted image locations and metadata with columns:
+            Combined GeoDataFrame containing extracted image locations and metadata with columns:
             - geometry : Point
                 Location where image was taken (from GPS track)
             - time : datetime
