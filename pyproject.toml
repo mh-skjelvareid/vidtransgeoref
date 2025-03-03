@@ -6,15 +6,10 @@ build-backend = "hatchling.build"
 name = "vidtransgeotag"
 version = "0.1.0"
 dependencies = [
-  "pandas>=2.1.0,<2.2.0",
-  "geopandas>=0.14.0,<0.15.0",
-  "numpy",
   "ffmpeg-python",
   "pyexiftool",
-  "pydantic",
   "python-dateutil",
   "tqdm",
-  "pyproj>=3.6.0,<3.7.0",
 ]
 requires-python = ">=3.10"
 authors = [

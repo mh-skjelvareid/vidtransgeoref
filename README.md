@@ -5,10 +5,11 @@ geolocation data streams.
 UNDER DEVELOPMENT - NOT READY FOR END USERS
 
 ## Dependencies
-The module requires FFMPEG and ExifTool to be installed on your system. One way to install
+The module requires the binaries FFMPEG and ExifTool to be installed on your system. The
+Python GeoPandas package also requires non-Python libraries. One simple way to install
 these is via Conda:
 
-    conda create -n vidtransgeotag -c conda-forge python=3.12 ffmpeg exiftool
+    conda create -n vidtransgeotag -c conda-forge python=3.12 ffmpeg exiftool geopandas
 
 Activate the environment afterwards:
 

@@ -154,8 +154,8 @@ class VidTransGeoTag:
             3. QuickTime:MediaCreateDate
             4. File:FileCreateDate
         """
-        with exiftool.ExifTool() as et:
-            metadata = et.get_metadata(str(video_path))
+        with exiftool.ExifToolHelper() as et:
+            metadata = et.get_metadata(str(video_path))[0]
 
             # Try multiple metadata tags in order of reliability
             creation_time_str = (
