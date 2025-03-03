@@ -402,59 +402,7 @@ class VidTransGeoTag:
             print(e.stderr.decode())
             raise
 
-    def write_gps_to_image(
-        self,
-        image_path: Path,
-        lat: float,
-        lon: float,
-        altitude: Optional[float] = None,
-        timestamp: Optional[datetime.datetime] = None,
-    ) -> None:
-        """Write GPS coordinates to image EXIF metadata.
 
-        Parameters
-        ----------
-        image_path : Path
-            Path to the image file
-        lat : float
-            Latitude in decimal degrees
-        lon : float
-            Longitude in decimal degrees
-        altitude : float, optional
-            Altitude in meters
-        timestamp : datetime.datetime, optional
-            GPS timestamp to write
-
-        Notes
-        -----
-        Uses exiftool to write the following GPS tags:
-        - GPSLatitude/GPSLatitudeRef
-        - GPSLongitude/GPSLongitudeRef
-        - GPSAltitude/GPSAltitudeRef (if altitude provided)
-        - GPSDateStamp/GPSTimeStamp (if timestamp provided)
-        """
-        with exiftool.ExifToolHelper() as et:
-            params = {
-                "GPSLatitude": lat,
-                "GPSLatitudeRef": "N" if lat >= 0 else "S",
-                "GPSLongitude": lon,
-                "GPSLongitudeRef": "E" if lon >= 0 else "W",
-            }
-
-            if altitude is not None:
-                params.update(
-                    {"GPSAltitude": abs(altitude), "GPSAltitudeRef": 0 if altitude >= 0 else 1}
-                )
-
-            if timestamp is not None:
-                params.update(
-                    {
-                        "GPSDateStamp": timestamp.strftime("%Y:%m:%d"),
-                        "GPSTimeStamp": timestamp.strftime("%H:%M:%S"),
-                    }
-                )
-
-            et.set_tags(str(image_path), params)
 
     def rename_image_files_with_timestamp(
         self, image_files: list[Path], video_name: str, image_times: pd.Series[datetime.timedelta]
@@ -537,7 +485,7 @@ class VidTransGeoTag:
 
         # Write GPS data to each image
         for image_file, (_, row) in zip(image_files, track_gdf_within_video.iterrows()):
-            self.write_gps_to_image(
+            write_geotag_to_image(
                 Path(image_file), lat=row.geometry.y, lon=row.geometry.x, timestamp=row.time
             )
 
@@ -616,3 +564,57 @@ class VidTransGeoTag:
             combined_gdf.to_file(gpkg_path, driver="GPKG")
 
         return combined_gdf
+
+
+def write_geotag_to_image(
+    image_path: Path,
+    lat: float,
+    lon: float,
+    altitude: Optional[float] = None,
+    timestamp: Optional[datetime.datetime] = None,
+) -> None:
+    """Write GPS coordinates to image EXIF metadata.
+
+    Parameters
+    ----------
+    image_path : Path
+        Path to the image file
+    lat : float
+        Latitude in decimal degrees
+    lon : float
+        Longitude in decimal degrees
+    altitude : float, optional
+        Altitude in meters
+    timestamp : datetime.datetime, optional
+        GPS timestamp to write
+
+    Notes
+    -----
+    Uses exiftool to write the following GPS tags:
+    - GPSLatitude/GPSLatitudeRef
+    - GPSLongitude/GPSLongitudeRef
+    - GPSAltitude/GPSAltitudeRef (if altitude provided)
+    - GPSDateStamp/GPSTimeStamp (if timestamp provided)
+    """
+    with exiftool.ExifToolHelper() as et:
+        params = {
+            "GPSLatitude": lat,
+            "GPSLatitudeRef": "N" if lat >= 0 else "S",
+            "GPSLongitude": lon,
+            "GPSLongitudeRef": "E" if lon >= 0 else "W",
+        }
+
+        if altitude is not None:
+            params.update(
+                {"GPSAltitude": abs(altitude), "GPSAltitudeRef": 0 if altitude >= 0 else 1}
+            )
+
+        if timestamp is not None:
+            params.update(
+                {
+                    "GPSDateStamp": timestamp.strftime("%Y:%m:%d"),
+                    "GPSTimeStamp": timestamp.strftime("%H:%M:%S"),
+                }
+            )
+
+        et.set_tags(str(image_path), params)

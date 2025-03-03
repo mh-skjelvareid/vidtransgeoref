@@ -6,7 +6,7 @@ theme:
   features:
     - content.code.copy
 
-repo_url: https://github.com/mh-skjelvareid/massipipe
+repo_url: https://github.com/mh-skjelvareid/vidtransgeotag
 
 plugins:
 - mkdocstrings:

@@ -1,5 +1,5 @@
-# vidtransgeoref
-Tools for generating georeferenced (geotagged) ground truth images by merging video and
+# vidtransgeotag
+Tools for generating geotagged ground truth images by merging video and
 geolocation data streams.
 
 UNDER DEVELOPMENT - NOT READY FOR END USERS
@@ -8,11 +8,11 @@ UNDER DEVELOPMENT - NOT READY FOR END USERS
 The module requires FFMPEG and ExifTool to be installed on your system. One way to install
 these is via Conda:
 
-    conda create -n vidtransgeoref -c conda-forge python=3.10 ffmpeg exiftool
+    conda create -n vidtransgeotag -c conda-forge python=3.10 ffmpeg exiftool
 
 Activate the environment afterwards:
 
-    conda activate vidtransgeoref
+    conda activate vidtransgeotag
 
 ## Installation
 Download the source code, navigate to the root of the source code folder, and install
