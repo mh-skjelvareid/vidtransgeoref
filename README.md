@@ -56,10 +56,20 @@ Example output:
 It's possible to iterate on this, changing time offsets until the timing is correct. 
 
 Extract images corresponding to every row of the CSV with timestamps overlapping the
-video file. Save a GeoPackage file with the positions and filenames of each image:
+video file. Save a GeoPackage file with the positions and filenames of each image.
 
     vidtransgeotag.extract_geotagged_images_from_video(
         video_path, 
         image_dir, 
-        gpkg_path="georagged_images.gpkg")
+        gpkg_path="geotagged_images.gpkg")
+
+Optionally, filter points so that the change in position from point to point is above
+a minimum distance (in meters):
+
+    vidtransgeotag.extract_geotagged_images_from_video(
+        video_path, 
+        image_dir, 
+        gpkg_path="geotagged_images.gpkg",
+        filter_min_distance_m=10.0)
+
 

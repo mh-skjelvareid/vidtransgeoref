@@ -23,8 +23,9 @@ video_path = Path(
 csv_path = Path(
     r"/home/mha114/Dropbox/Python/vidtransgeotag/example_data/example_input/2025-03-01_143053_BodoVidTransTest.csv"
 )
-output_dir = Path("/home/mha114/Dropbox/Python/vidtransgeotag/example_data/example_output")
+output_dir = Path("/media/mha114/Massimal2/tmp/test_vidtransgeotag")
 image_dir = output_dir / "images"
+image_dir.mkdir(exist_ok=True)
 gpkg_path = output_dir / "geotagged_images.gpkg"
 
 vidtransgeotag = VidTransGeoTag(
@@ -35,4 +36,6 @@ vidtransgeotag = VidTransGeoTag(
 
 vidtransgeotag.check_video_overlaps_track(video_path=video_path, verbose=True)
 
-# vidtransgeotag.extract_geotagged_images_from_video(video_path, image_dir, gpkg_path=gpkg_path)
+vidtransgeotag.extract_geotagged_images_from_video(
+    video_path, image_dir, gpkg_path=gpkg_path, filter_min_distance_m=10.0
+)

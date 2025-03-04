@@ -222,7 +222,7 @@ class VidTransGeoTag:
         self,
         gdf: geopandas.GeoDataFrame,
         epsg: Optional[int] = None,
-        sample_distance: float = 1.0,
+        min_distance: float = 1.0,
         outlier_distance: float = 1000.0,
     ) -> geopandas.GeoDataFrame:
         """Filter a geodataframe by including samples only when position has changed significantly.
@@ -233,7 +233,7 @@ class VidTransGeoTag:
             Input geodataframe to filter
         epsg : int, optional
             EPSG code for CRS to measure distance in. If None, best matching UTM zone will be used
-        sample_distance : float, default=1.0
+        min_distance : float, default=1.0
             Minimum change in position required for next sample to be included.
             Units defined by CRS
         outlier_distance : float, default=1000.0
@@ -274,7 +274,7 @@ class VidTransGeoTag:
         last_pos = geom.iloc[0]  # Position at first point
         for index, position in enumerate(geom):
             dist = position.distance(last_pos)
-            if (dist > sample_distance) and (dist < outlier_distance):
+            if (dist > min_distance) and (dist < outlier_distance):
                 mask.append(index)
                 last_pos = position
 
@@ -498,7 +498,11 @@ class VidTransGeoTag:
         return new_image_files
 
     def extract_geotagged_images_from_video(
-        self, video_path: Path, image_output_folder: Path, gpkg_path: Optional[Path] = None
+        self,
+        video_path: Path,
+        image_output_folder: Path,
+        gpkg_path: Optional[Path] = None,
+        filter_min_distance_m: Optional[float] = None,
     ) -> Optional[geopandas.GeoDataFrame]:
         """Extract geotagged images from video at timestamps overlapping with track
 
@@ -521,6 +525,10 @@ class VidTransGeoTag:
 
         # Get timestamps overlapping with video duration
         track_gdf_within_video = self.get_track_points_within_video(video_path)
+        if filter_min_distance_m:
+            track_gdf_within_video = self.filter_gdf_on_distance(
+                track_gdf_within_video, min_distance=filter_min_distance_m
+            )
         track_timestamps = track_gdf_within_video.time
 
         # Calculate image times (in seconds) relative to video start time
