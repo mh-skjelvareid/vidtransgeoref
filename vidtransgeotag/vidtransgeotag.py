@@ -33,12 +33,14 @@ class VidTransGeoTag:
         self,
         csv_file_path: Path,
         csv_time_add_offset: datetime.timedelta = datetime.timedelta(seconds=0),
+        video_time_add_offset: datetime.timedelta = datetime.timedelta(seconds=0),
         csv_header_lat: Optional[str] = None,
         csv_header_lon: Optional[str] = None,
         csv_header_time: Optional[str] = None,
     ) -> None:
         self.csv_file_path = csv_file_path
         self.csv_time_add_offset = csv_time_add_offset
+        self.video_time_add_offset = video_time_add_offset
         self.csv_header_lat = csv_header_lat
         self.csv_header_lon = csv_header_lon
         self.csv_header_time = csv_header_time
@@ -176,8 +178,43 @@ class VidTransGeoTag:
             raise ValueError("Duration not found in video metadata")
 
         creation_time = self._normalize_datetime(dateutil.parser.parse(creation_time_str))
+        creation_time += self.video_time_add_offset
         duration = datetime.timedelta(seconds=duration)
         return creation_time, duration
+
+    def get_video_frame_rate(self, video_path: Path) -> float:
+        """Get the frame rate of a video file.
+
+        Parameters
+        ----------
+        video_path : Path
+            Path object representing the location of the video file.
+
+        Returns
+        -------
+        float
+            The frame rate in frames per second.
+
+        Raises
+        ------
+        RuntimeError
+            If there's an error probing the video file with ffmpeg.
+        ValueError
+            If the frame rate information is not found in the video metadata.
+        """
+        try:
+            probe = ffmpeg.probe(str(video_path))
+        except ffmpeg.Error as e:
+            raise RuntimeError(f"Error probing video file: {e}")
+
+        try:
+            frame_rate_str = probe["streams"][0]["avg_frame_rate"]
+        except KeyError:
+            raise ValueError("Frame rate not found in video metadata")
+
+        num, denom = frame_rate_str.split("/")  # e.g. "30000/1001"
+        frame_rate = float(num) / float(denom)
+        return frame_rate
 
     def filter_gdf_on_distance(
         self,
@@ -264,7 +301,11 @@ class VidTransGeoTag:
             return dt.replace(tzinfo=datetime.timezone.utc)
         return dt.astimezone(datetime.timezone.utc)
 
-    def check_video_overlaps_track(self, video_path: Path, verbose: bool = False) -> bool:
+    def check_video_overlaps_track(
+        self,
+        video_path: Path,
+        verbose: bool = False,
+    ) -> bool:
         """Check if video timestamps overlap with track timestamps.
 
         This function compares the start and end timestamps of a video file with the
@@ -311,7 +352,10 @@ class VidTransGeoTag:
                 print("Video partly overlaps with track")
             return True
 
-    def get_track_points_within_video(self, video_path: Path) -> geopandas.GeoDataFrame:
+    def get_track_points_within_video(
+        self,
+        video_path: Path,
+    ) -> geopandas.GeoDataFrame:
         """Identify track positions contained within video time window
 
         Returns
@@ -333,6 +377,7 @@ class VidTransGeoTag:
     def images_from_video(
         self,
         video_input_file,
+        video_frame_rate,
         times,
         image_output_template: Union[str, Path] = "image_%06d.jpg",
         image_quality=5,
@@ -374,8 +419,15 @@ class VidTransGeoTag:
         # Sort times to ensure sequential access
         times = sorted(times)
 
-        # Create select_frames filter using 'nearest' mode
-        select_expr = "+".join([f"not(mod(t,{t}))" for t in times])
+        # Calculate frame search margin
+        frame_margin = (
+            0.5 * (1 / video_frame_rate)
+        ) * 0.9999  # 0.9999 to avoid duplicates (time search interval includes both ends)
+
+        # Create select_frames filter
+        select_expr = "+".join(
+            [f"between(t,{t - frame_margin:.6f},{t + frame_margin:.6f})" for t in times]
+        )
 
         try:
             out, _ = (
@@ -385,6 +437,7 @@ class VidTransGeoTag:
                 .output(
                     str(image_output_template),
                     format="image2",
+                    vsync="0",  # Prevent frame duplication
                     vcodec="mjpeg",
                     **{"q:v": image_quality},
                 )
@@ -442,7 +495,9 @@ class VidTransGeoTag:
             new_image_files.append(new_image_file)
         return new_image_files
 
-    def extract_geotagged_images_from_video(self, video_path: Path, image_output_folder: Path):
+    def extract_geotagged_images_from_video(
+        self, video_path: Path, image_output_folder: Path, gpkg_path: Optional[Path] = None
+    ) -> Optional[geopandas.GeoDataFrame]:
         """Extract geotagged images from video at timestamps overlapping with track
 
         Parameters
@@ -468,21 +523,23 @@ class VidTransGeoTag:
 
         # Calculate image times (in seconds) relative to video start time
         video_start_time, _ = self.get_video_start_time_and_duration(video_path)
+        video_frame_rate = self.get_video_frame_rate(video_path)
         image_time_relative_to_video_start = pd.TimedeltaIndex(track_timestamps - video_start_time)
 
         # Extract images at overlapping timestamps
         image_output_template = image_output_folder / "image_%06d.jpg"
         image_files = self.images_from_video(
             video_path,
+            video_frame_rate,
             times=image_time_relative_to_video_start.total_seconds(),
             image_output_template=image_output_template,
         )
 
         # Write GPS data to each image
-        for image_file, (_, row) in zip(image_files, track_gdf_within_video.iterrows()):
-            write_geotag_to_image(
-                Path(image_file), lat=row.geometry.y, lon=row.geometry.x, timestamp=row.time
-            )
+        # for image_file, (_, row) in zip(image_files, track_gdf_within_video.iterrows()):
+        #     write_geotag_to_image(
+        #         Path(image_file), lat=row.geometry.y, lon=row.geometry.x, timestamp=row.time
+        #     )
 
         # Rename image files with video name and timestamp
         renamed_image_files = self._rename_image_files_with_timestamp(
@@ -490,7 +547,11 @@ class VidTransGeoTag:
         )
 
         # Add image filenames to track_gdf_within_video
-        track_gdf_within_video["image_file"] = renamed_image_files
+        track_gdf_within_video["image_file"] = [f.name for f in renamed_image_files]
+
+        # Save to GeoPackage if path is provided
+        if gpkg_path:
+            track_gdf_within_video.to_file(gpkg_path, driver="GPKG")
 
         return track_gdf_within_video
 
