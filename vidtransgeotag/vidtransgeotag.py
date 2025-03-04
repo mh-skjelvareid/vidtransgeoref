@@ -1,8 +1,10 @@
 # Imports
 import datetime
+import os
 import platform
 import re
 import shutil
+import tempfile
 import warnings
 from pathlib import Path
 from typing import Optional, Union
@@ -672,3 +674,64 @@ def write_geotag_to_image(
             )
 
         et.set_tags(str(image_path), params)
+
+
+def merge_videos_in_directory(input_dir: Path, output_file: Path) -> None:
+    """
+    Merges all MP4 video files in the given directory into one file without transcoding.
+    Assumes the files (sorted alphabetically) are from a single recording. The creation_time
+    metadata from the first file is transferred to the merged output.
+
+    Parameters
+    ----------
+    input_dir : Path
+        Directory containing the MP4 video files.
+    output_file : Path
+        Path to the merged output video file.
+
+    Raises
+    ------
+    ValueError
+        If no MP4 files are found in the provided directory.
+    RuntimeError
+        If probing the first file fails or ffmpeg fails to merge the videos.
+    """
+    # List and sort all MP4 files in the directory
+    video_files = sorted(
+        [f for f in input_dir.iterdir() if f.is_file() and f.suffix.lower() == ".mp4"]
+    )
+    if not video_files:
+        raise ValueError("No MP4 video files found in the provided directory.")
+
+    # Probe the first video file to extract the creation time metadata
+    try:
+        probe = ffmpeg.probe(str(video_files[0]))
+        creation_time = probe.get("format", {}).get("tags", {}).get("creation_time")
+    except ffmpeg.Error as e:
+        raise RuntimeError(f"Error probing the first video file: {e}")
+
+    # Create a temporary file list for the ffmpeg concat demuxer
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt") as file_list:
+        for video in video_files:
+            # Using absolute paths is recommended when using -safe 0
+            file_list.write(f"file '{video.resolve()}'\n")
+        list_file_path = file_list.name
+
+    try:
+        # Create an input stream from the file list using the concat demuxer.
+        # The 'safe' flag is set to 0 to allow absolute paths.
+        input_stream = ffmpeg.input(list_file_path, format="concat", safe=0)
+
+        # Build output parameters. We use "copy" mode to avoid transcoding.
+        output_params = {"c": "copy"}
+        if creation_time:
+            output_params["metadata"] = f"creation_time={creation_time}"
+
+        # Build and run the ffmpeg command using the ffmpeg-python chain.
+        stream = ffmpeg.output(input_stream, str(output_file), **output_params)
+        ffmpeg.run(stream, overwrite_output=True)
+    except ffmpeg.Error as e:
+        raise RuntimeError(f"ffmpeg failed to merge videos: {e}")
+    finally:
+        # Clean up the temporary file list.
+        os.remove(list_file_path)
