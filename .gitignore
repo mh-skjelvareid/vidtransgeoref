@@ -163,3 +163,4 @@ cython_debug/
 
 # Custom ignore files / folders
 /notes
+/dev_notebooks
