@@ -684,7 +684,12 @@ def write_geotag_to_image(
         et.set_tags(str(image_path), params)
 
 
-def merge_videos_in_directory(input_dir: Path, output_file: Path) -> None:
+def merge_videos_in_directory(
+    input_dir: Path,
+    output_file: Path,
+    compress_by_transcoding: bool = False,
+    transcoding_quality_crf=28,
+) -> None:
     """
     Merges all MP4 video files in the given directory into one file without transcoding.
     Assumes the files (sorted alphabetically) are from a single recording. The creation_time
@@ -696,6 +701,12 @@ def merge_videos_in_directory(input_dir: Path, output_file: Path) -> None:
         Directory containing the MP4 video files.
     output_file : Path
         Path to the merged output video file.
+    compress_by_transcoding : bool, optional
+        If True, the videos are compressed by transcoding to H.264 using libx264, by default False
+    transcoding_quality_crf : int, optional
+        Constant Rate Factor (CRF) for libx264 (0-51, lower is higher quality), by
+        default 28. Ignored if compress_by_transcoding is False.
+
 
     Raises
     ------
@@ -703,6 +714,12 @@ def merge_videos_in_directory(input_dir: Path, output_file: Path) -> None:
         If no MP4 files are found in the provided directory.
     RuntimeError
         If probing the first file fails or ffmpeg fails to merge the videos.
+
+    Notes
+    -----
+    - The constant rate factor (CRF) controls the quality of the output video. A value
+      of 23 is often considered a good compromise between quality and file size. A default
+      of 28 is used here for slightly more aggressive compression.
     """
     # List and sort all MP4 files in the directory
     video_files = sorted(
@@ -730,8 +747,15 @@ def merge_videos_in_directory(input_dir: Path, output_file: Path) -> None:
         # The 'safe' flag is set to 0 to allow absolute paths.
         input_stream = ffmpeg.input(list_file_path, format="concat", safe=0)
 
-        # Build output parameters. We use "copy" mode to avoid transcoding.
-        output_params = {"c": "copy"}
+        # Build output parameters.
+        if compress_by_transcoding:
+            output_params = {
+                "vcodec": "libx264",
+                "crf": transcoding_quality_crf,
+            }
+        else:
+            output_params = {"c": "copy"}  # Copy mode, no transcoding
+
         if creation_time:
             output_params["metadata"] = f"creation_time={creation_time}"
 
