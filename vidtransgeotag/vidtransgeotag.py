@@ -1,22 +1,28 @@
 # Imports
 import datetime
+import platform
 import re
 import shutil
 import warnings
 from pathlib import Path
 from typing import Optional, Union
 
+import dateutil.parser
 import exiftool
 import ffmpeg
 import geopandas
 import numpy as np
 import pandas as pd
 import pyproj
-from dateutil import parser
 from tqdm import tqdm
 
 # Suppress "future" warnings (issue with shapely / geopandas)
 warnings.simplefilter(action="ignore", category=FutureWarning)
+
+# Set exiftool path to exiftool.bat on Windows (installed via conda)
+if platform.system().lower() == "windows":
+    exiftool.constants.DEFAULT_EXECUTABLE = "exiftool.bat"  # type: ignore
+
 
 # Note: Also check out batch geotegging of images
 # https://help.propelleraero.com/hc/en-us/articles/19384091245719-How-to-Batch-Geotag-Photos-with-ExifTool
@@ -122,78 +128,17 @@ class VidTransGeoTag:
             df[[time_col]],
             geometry=geopandas.points_from_xy(df[lon_col], df[lat_col]),
             crs="EPSG:4326",
-        )
+        )  # type: ignore
 
         # Rename the time column
         gdf = gdf.rename(columns={time_col: "time"})
 
         return gdf
 
-    def get_video_creation_time(self, video_path: Path) -> datetime.datetime:
-        """Extract video creation time from metadata, including timezone if available.
-
-        This function uses ExifTool to extract the video creation timestamp from various metadata
-        fields, checking multiple tags in order of reliability.
-
-        Parameters
-        ----------
-        video_path : Path
-            Path object pointing to the video file
-
-        Returns
-        -------
-        datetime.datetime
-            The creation time of the video as a datetime object, timezone-aware if available
-
-        Raises
-        ------
-        ValueError
-            If the creation time cannot be found in metadata or if the date format is unrecognized
-
-        Notes
-        -----
-        The function checks the following metadata tags in order:
-            1. QuickTime:CreateDate
-            2. EXIF:DateTimeOriginal
-            3. QuickTime:MediaCreateDate
-            4. File:FileCreateDate
-
-        And these timezone tags:
-            1. QuickTime:CreateDateTZ
-            2. EXIF:OffsetTimeOriginal
-            3. QuickTime:MediaCreateDateTZ
-        """
-        with exiftool.ExifToolHelper() as et:
-            metadata = et.get_metadata(str(video_path))[0]
-
-            # Try multiple metadata tags in order of reliability
-            creation_time_str = (
-                metadata.get("QuickTime:CreateDate")
-                or metadata.get("EXIF:DateTimeOriginal")
-                or metadata.get("QuickTime:MediaCreateDate")
-                or metadata.get("File:FileCreateDate")
-            )
-
-            # Try to get timezone information
-            tz_str = (
-                metadata.get("QuickTime:CreateDateTZ")
-                or metadata.get("EXIF:OffsetTimeOriginal")
-                or metadata.get("QuickTime:MediaCreateDateTZ")
-            )
-
-            if creation_time_str:
-                try:
-                    # If timezone info exists, append it to the datetime string
-                    if tz_str:
-                        creation_time_str = f"{creation_time_str}{tz_str}"
-                    return parser.parse(creation_time_str)
-                except parser.ParserError:
-                    raise ValueError(f"Unrecognized date format: {creation_time_str}")
-            else:
-                raise ValueError("Creation time not found in video metadata")
-
-    def get_video_duration(self, video_path: Path) -> float:
-        """Get the duration of a video file in seconds.
+    def get_video_start_time_and_duration(
+        self, video_path: Path
+    ) -> tuple[datetime.datetime, datetime.timedelta]:
+        """Get the creation time and duration of a video file.
 
         Parameters
         ----------
@@ -202,25 +147,37 @@ class VidTransGeoTag:
 
         Returns
         -------
-        float
-            Duration of the video in seconds.
+        tuple[datetime.datetime, float]
+            A tuple containing:
+            - creation_time: The video creation time as datetime
+            - duration: Duration of the video as timedelta
 
         Raises
         ------
         RuntimeError
             If there's an error probing the video file with ffmpeg.
         ValueError
-            If the duration information is not found in the video metadata.
+            If the creation time or duration information is not found in the video metadata.
 
         """
         try:
             probe = ffmpeg.probe(str(video_path))
-            duration = float(probe["format"]["duration"])
-            return duration
         except ffmpeg.Error as e:
             raise RuntimeError(f"Error probing video file: {e}")
+
+        try:
+            creation_time_str = probe["format"]["tags"]["creation_time"]
+        except KeyError:
+            raise ValueError("Creation time not found in video metadata")
+
+        try:
+            duration = float(probe["format"]["duration"])
         except KeyError:
             raise ValueError("Duration not found in video metadata")
+
+        creation_time = self._normalize_datetime(dateutil.parser.parse(creation_time_str))
+        duration = datetime.timedelta(seconds=duration)
+        return creation_time, duration
 
     def filter_gdf_on_distance(
         self,
@@ -258,9 +215,9 @@ class VidTransGeoTag:
             # Calculate centroid of all points
             centroid = gdf.geometry.unary_union.centroid
             # Use pyproj to find best UTM projection
-            proj_string = pyproj.database.query_utm_crs_info(
+            proj_string = pyproj.database.query_utm_crs_info(  # type: ignore
                 datum_name="WGS 84",
-                area_of_interest=pyproj.aoi.AreaOfInterest(
+                area_of_interest=pyproj.aoi.AreaOfInterest(  # type: ignore
                     west_lon_degree=centroid.x,
                     south_lat_degree=centroid.y,
                     east_lon_degree=centroid.x,
@@ -327,10 +284,9 @@ class VidTransGeoTag:
             True if video timestamps overlap with track timestamps, False otherwise
 
         """
-        video_start_time = self._normalize_datetime(self.get_video_creation_time(video_path))
-        video_end_time = self._normalize_datetime(
-            video_start_time + datetime.timedelta(seconds=self.get_video_duration(video_path))
-        )
+        video_start_time, video_duration = self.get_video_start_time_and_duration(video_path)
+        video_end_time = video_start_time + video_duration
+
         track_start_time = self._normalize_datetime(self.track_gdf.time.min())
         track_end_time = self._normalize_datetime(self.track_gdf.time.max())
 
@@ -364,14 +320,13 @@ class VidTransGeoTag:
             GeoDataFrame containing only rows whose timestamps overlap with video time window
         """
         # Get video time window
-        video_start_time = self.get_video_creation_time(video_path)
-        video_duration = datetime.timedelta(seconds=self.get_video_duration(video_path))
+        video_start_time, video_duration = self.get_video_start_time_and_duration(video_path)
 
         # Filter GeoDataFrame to only include rows within video time window
         mask = (self.track_gdf.time >= video_start_time) & (
             self.track_gdf.time <= (video_start_time + video_duration)
         )
-        overlapping_gdf = geopandas.GeoDataFrame(self.track_gdf[mask], crs=self.track_gdf.crs)
+        overlapping_gdf = geopandas.GeoDataFrame(self.track_gdf[mask], crs=self.track_gdf.crs)  # type: ignore
 
         return overlapping_gdf
 
@@ -512,7 +467,7 @@ class VidTransGeoTag:
         track_timestamps = track_gdf_within_video.time
 
         # Calculate image times (in seconds) relative to video start time
-        video_start_time = self.get_video_creation_time(video_path)
+        video_start_time, _ = self.get_video_start_time_and_duration(video_path)
         image_time_relative_to_video_start = pd.TimedeltaIndex(track_timestamps - video_start_time)
 
         # Extract images at overlapping timestamps
@@ -589,15 +544,13 @@ class VidTransGeoTag:
 
         if not gdfs_with_image_file_names:
             print("No valid data found. Returning empty GeoDataFrame.")
-            return geopandas.GeoDataFrame(
-                geometry=[], crs="EPSG:4326"
-            )  # Return empty GeoDataFrame if no valid data
+            return geopandas.GeoDataFrame(geometry=[], crs="EPSG:4326")  # type: ignore # Return empty GeoDataFrame if no valid data
 
         # Combine all GeoDataFrames into a single one using GeoDataFrame.concat()
         combined_gdf = geopandas.GeoDataFrame(
             pd.concat(gdfs_with_image_file_names, ignore_index=True),
             crs=gdfs_with_image_file_names[0].crs,
-        )
+        )  # type: ignore
 
         # Save to GeoPackage if path is provided
         if gpkg_path:
