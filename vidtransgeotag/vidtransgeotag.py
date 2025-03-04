@@ -426,6 +426,21 @@ class VidTransGeoTag:
             0.5 * (1 / video_frame_rate)
         ) * 0.9999  # 0.9999 to avoid duplicates (time search interval includes both ends)
 
+        # TODO: Process timestamps in batches
+        # The code below uses a select filter to extract frames at specific timestamps.
+        # This can be slow for large number of timestamps, because the select filter
+        # expression grows very large, and the expression has to be evaluated for each frame.
+        # A more efficient approach would be to extract frames in batches, e.g. 10
+        # frames at a time. Using FFMPEG options like "seek" (-s) and "duration" (-t) to
+        # process only a small part of the video at a time could also be beneficial.
+        # Starting times and durations are easily calculated from the timestamps. To
+        # avoid that the automatic image numbering restarts at zero for each batch,
+        # either add the batch number to image_output_template, or use the ffmpeg input
+        # "start number", e.g.
+        #     .output(...,**{"q:v": image_quality, "start_number": 100})
+        # The file name created by image_output_template is temporary anyway - it only
+        # has to be unique.
+
         # Create select_frames filter
         select_expr = "+".join(
             [f"between(t,{t - frame_margin:.6f},{t + frame_margin:.6f})" for t in times]
