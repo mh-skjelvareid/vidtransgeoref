@@ -1,5 +1,6 @@
 # Imports
 import datetime
+import itertools
 import os
 import platform
 import re
@@ -16,6 +17,7 @@ import geopandas
 import numpy as np
 import pandas as pd
 import pyproj
+from numpy.typing import NDArray
 from tqdm import tqdm
 
 # Suppress "future" warnings (issue with shapely / geopandas)
@@ -209,14 +211,16 @@ class VidTransGeoTag:
         except ffmpeg.Error as e:
             raise RuntimeError(f"Error probing video file: {e}")
 
-        try:
-            frame_rate_str = probe["streams"][0]["avg_frame_rate"]
-        except KeyError:
-            raise ValueError("Frame rate not found in video metadata")
+        for key in ["avg_frame_rate", "r_frame_rate"]:
+            frame_rate_str = probe["streams"][0].get(key, "0/1")
+            if frame_rate_str not in ("", "N/A"):
+                try:
+                    num, denom = map(int, frame_rate_str.split("/"))  # e.g. "30000/1001"
+                    return num / denom
+                except (ValueError, ZeroDivisionError):
+                    continue  # Try the next key
 
-        num, denom = frame_rate_str.split("/")  # e.g. "30000/1001"
-        frame_rate = float(num) / float(denom)
-        return frame_rate
+        raise ValueError("Valid frame rate not found in video metadata")
 
     def filter_gdf_on_distance(
         self,
@@ -378,12 +382,14 @@ class VidTransGeoTag:
 
     def images_from_video(
         self,
-        video_input_file,
-        video_frame_rate,
-        times,
-        image_output_template: Union[str, Path] = "image_%06d.jpg",
-        image_quality=5,
-        overwrite=True,
+        video_input_file: Path,
+        video_frame_rate: float,
+        image_base_name: str,
+        image_output_dir: Path,
+        times: NDArray,
+        batch_size: int = 20,
+        image_quality: int = 5,
+        overwrite: bool = True,
     ):
         """Extract multiple images from video at given times
 
@@ -391,14 +397,17 @@ class VidTransGeoTag:
         ----------
         video_input_file : str or Path
             Path to input video file
-        image_output_template : str or Path
-            Template for output image files. Must contain '%0<n_digits>d' which will be
-            replaced with the frame number. Example: 'image_%06d.jpg' (zero-pads to 6
-            digits)
+        image_base_name : str
+            Base name for output image files (used during renaming)
+        image_output_dir : Path
+            Directory in which to output images
         times : list or array-like
             List of timestamps in seconds to extract frames from
+        batch_size : int, optional
+            Number of time points to process per ffmpeg call, by default 20
         image_quality : int, optional
-            FFmpeg quality parameter (1-31), by default 5
+            FFmpeg quality parameter (1-31), by default 5.
+            Lower values result in higher quality images.
         overwrite : bool, optional
             Whether to overwrite existing files, by default True
 
@@ -406,109 +415,108 @@ class VidTransGeoTag:
         -------
         list
             List of generated output filenames
-
-        Raises
-        ------
-        ValueError
-            If image_output_template doesn't contain proper format specifier
         """
-        # Extract the format specifier pattern for template filename (e.g., '%06d')
-        image_numbering_spec = re.search(r"%0\d+d", str(image_output_template))
-        if not image_numbering_spec:
-            raise ValueError("image_output_template must contain format specifier like '%06d'")
-        image_numbering_spec = image_numbering_spec.group(0)  # Get full re match (e.g. '%06d')
+        IMAGE_OUTPUT_TEMPLATE = image_output_dir / "image_%d.jpg"
+        SEEK_WINDOW_MARGIN = 1.0  # seconds
 
         # Sort times to ensure sequential access
-        times = sorted(times)
+        times = np.sort(times)
 
-        # Calculate frame search margin
-        frame_margin = (
-            0.5 * (1 / video_frame_rate)
-        ) * 0.9999  # 0.9999 to avoid duplicates (time search interval includes both ends)
+        # Calculate frame numbers for frames closest to each timestamp
+        frames = (np.array(times) * video_frame_rate).astype(int)
 
-        # TODO: Process timestamps in batches
-        # The code below uses a select filter to extract frames at specific timestamps.
-        # This can be slow for large number of timestamps, because the select filter
-        # expression grows very large, and the expression has to be evaluated for each frame.
-        # A more efficient approach would be to extract frames in batches, e.g. 10
-        # frames at a time. Using FFMPEG options like "seek" (-s) and "duration" (-t) to
-        # process only a small part of the video at a time could also be beneficial.
-        # Starting times and durations are easily calculated from the timestamps. To
-        # avoid that the automatic image numbering restarts at zero for each batch,
-        # either add the batch number to image_output_template, or use the ffmpeg input
-        # "start number", e.g.
-        #     .output(...,**{"q:v": image_quality, "start_number": 100})
-        # The file name created by image_output_template is temporary anyway - it only
-        # has to be unique.
+        # Divide times and frames into batches
+        n_batches = (len(times) // batch_size) + 1  # Add 1 to avoid possible zero
+        times_batched = np.array_split(times, n_batches)
+        frames_batched = np.array_split(frames, n_batches)
 
-        # Create select_frames filter
-        select_expr = "+".join(
-            [f"between(t,{t - frame_margin:.6f},{t + frame_margin:.6f})" for t in times]
-        )
+        # Initialize list to store image paths
+        image_paths = []
 
-        try:
-            out, _ = (
-                ffmpeg.input(video_input_file)
-                .filter("select", select_expr)
-                .filter("settb", "AVTB")  # Fix timestamp basis
-                .output(
-                    str(image_output_template),
-                    format="image2",
-                    vsync="0",  # Prevent frame duplication
-                    vcodec="mjpeg",
-                    **{"q:v": image_quality},
+        for time_batch, frame_batch in tqdm(zip(times_batched, frames_batched), total=n_batches):
+            seek_start = time_batch[0] - SEEK_WINDOW_MARGIN
+            seek_duration = time_batch[-1] - time_batch[0] + 2 * SEEK_WINDOW_MARGIN
+            frame_offset = int(seek_start * video_frame_rate)
+
+            # Create select_frames filter
+            select_expr = "+".join(
+                f"eq(n,{frame_number - frame_offset})" for frame_number in frame_batch
+            )  # When using seek, frame numbering is relative to seek start
+
+            # Call FFMPEG to extract images
+            try:
+                out, _ = (
+                    # Use -ss and -t to restrict processing to the relevant segment.
+                    ffmpeg.input(video_input_file, ss=seek_start, t=seek_duration)
+                    .filter("select", select_expr)
+                    .filter("settb", "AVTB")  # Fix timestamp basis
+                    .output(
+                        str(IMAGE_OUTPUT_TEMPLATE),
+                        format="image2",
+                        vsync="0",  # Prevent frame duplication
+                        vcodec="mjpeg",
+                        **{"q:v": image_quality},  # Set image quality
+                    )
+                    .run(capture_stdout=True, capture_stderr=True, overwrite_output=overwrite)
                 )
-                .run(capture_stdout=True, capture_stderr=True, overwrite_output=overwrite)
+            except ffmpeg.Error as e:
+                print(e.stderr.decode())
+                raise
+
+            # Generate list of created image files
+            temp_image_files = [
+                Path(str(IMAGE_OUTPUT_TEMPLATE).replace("%d", str(i + 1)))
+                for i in range(len(frame_batch))
+            ]
+
+            # Rename image files with video name and timestamp
+            image_paths.extend(
+                self._rename_image_files_with_timestamp(
+                    temp_image_files, image_base_name, time_batch
+                )
             )
 
-            # Get the number of digits in image file name from the format specifier
-            image_ndigits = int(image_numbering_spec[2:-1])
-
-            # Generate list of created files
-            output_files = [
-                Path(
-                    str(image_output_template).replace(
-                        image_numbering_spec, str(i + 1).zfill(image_ndigits)
-                    )
-                )
-                for i in range(len(times))
-            ]
-            return output_files
-
-        except ffmpeg.Error as e:
-            print(e.stderr.decode())
-            raise
+        return image_paths
 
     def _rename_image_files_with_timestamp(
-        self, image_files: list[Path], video_name: str, image_times: "pd.TimedeltaIndex"
+        self, image_files: list[Path], image_base_name: str, image_times: NDArray
     ) -> list[Path]:
-        """Rename image files with video name and timestamp.
+        """Rename image files, combining a base name with a time stamp.
 
         Parameters
         ----------
         image_files : list[Path]
-            List of Path objects pointing to image files to be renamed
-        video_name : str
-            Name of the video file to use in the new filenames
-        image_times : pd.TimedeltaIndex
-            TimedeltaIndex containing timestamps for each image
+            List of image file paths to be renamed.
+        image_base_name : str
+            Base name (typically the video file stem) to prepend to the timestamp.
+        image_times : NDArray
+            Array of time deltas (in seconds) relative to video start time.
 
         Returns
         -------
         list[Path]
-            List of renamed image file paths
+            List of renamed image file paths.
+
+        Raises
+        ------
+        FileNotFoundError
+            If any specified image file does not exist.
+        Exception
+            If any error occurs during the renaming process.
         """
         new_image_files = []
         for image_file, image_time in zip(image_files, image_times):
-            # Convert pandas Timedelta to total seconds
-            total_seconds = image_time.total_seconds()
-            minutes = int(total_seconds // 60)
-            seconds = int(total_seconds % 60)
-            milliseconds = int((total_seconds % 1) * 1000)
-
+            minutes = int(image_time // 60)
+            seconds = int(image_time % 60)
+            milliseconds = int((image_time % 1) * 1000)
             time_string = f"{minutes:03d}m{seconds:02d}s{milliseconds:03d}ms"
-            new_image_file = image_file.parent / f"{video_name}_{time_string}{image_file.suffix}"
-            shutil.move(image_file, new_image_file)
+            new_image_file = (
+                image_file.parent / f"{image_base_name}_{time_string}{image_file.suffix}"
+            )
+            try:
+                shutil.move(image_file, new_image_file)
+            except Exception as e:
+                raise Exception(f"Failed to rename {image_file} to {new_image_file}: {e}")
             new_image_files.append(new_image_file)
         return new_image_files
 
@@ -549,30 +557,21 @@ class VidTransGeoTag:
         # Calculate image times (in seconds) relative to video start time
         video_start_time, _ = self.get_video_start_time_and_duration(video_path)
         video_frame_rate = self.get_video_frame_rate(video_path)
-        image_time_relative_to_video_start = pd.TimedeltaIndex(track_timestamps - video_start_time)
+        image_time_relative_to_video_start = pd.TimedeltaIndex(
+            track_timestamps - video_start_time
+        ).total_seconds()
 
         # Extract images at overlapping timestamps
-        image_output_template = image_output_folder / "image_%06d.jpg"
         image_files = self.images_from_video(
             video_path,
             video_frame_rate,
-            times=image_time_relative_to_video_start.total_seconds(),
-            image_output_template=image_output_template,
-        )
-
-        # Write GPS data to each image
-        # for image_file, (_, row) in zip(image_files, track_gdf_within_video.iterrows()):
-        #     write_geotag_to_image(
-        #         Path(image_file), lat=row.geometry.y, lon=row.geometry.x, timestamp=row.time
-        #     )
-
-        # Rename image files with video name and timestamp
-        renamed_image_files = self._rename_image_files_with_timestamp(
-            image_files, video_path.stem, image_time_relative_to_video_start
+            image_base_name=video_path.stem,
+            image_output_dir=image_output_folder,
+            times=image_time_relative_to_video_start,  # type: ignore
         )
 
         # Add image filenames to track_gdf_within_video
-        track_gdf_within_video["image_file"] = [f.name for f in renamed_image_files]
+        track_gdf_within_video["image_file"] = [f.name for f in image_files]
 
         # Save to GeoPackage if path is provided
         if gpkg_path:

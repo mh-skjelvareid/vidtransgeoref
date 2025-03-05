@@ -37,5 +37,5 @@ vidtransgeotag = VidTransGeoTag(
 vidtransgeotag.check_video_overlaps_track(video_path=video_path, verbose=True)
 
 vidtransgeotag.extract_geotagged_images_from_video(
-    video_path, image_dir, gpkg_path=gpkg_path, filter_min_distance_m=10.0
+    video_path, image_dir, gpkg_path=gpkg_path, filter_min_distance_m=2.0
 )
