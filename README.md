@@ -72,4 +72,34 @@ a minimum distance (in meters):
         gpkg_path="geotagged_images.gpkg",
         filter_min_distance_m=10.0)
 
+Note that the geotagging information is currently only saved in the GeoPackage file, and
+not written as EXIF metadata in the image files. However, writing EXIF metadata is a
+goal for future work on the package. 
+
+## Merging video split across multiple files
+vidtransgeotag uses ffmpeg to read metadata from video files and find the timestamp for
+the start of the recording. Note that cameras that split long recordings across multiple
+files (e.g. GoPro) may use the same timestamp for all files, even though it's only
+really valid for the first file. This can cause problems when coordinating the
+timestamps in the position log and in the video files. 
+
+To avoid this problem, vidtransgeotag provides a function for merging multiple video
+files into one, while retaining the timestamp in the metadata. All files from a single
+recording are assumed to be placed inside the same directory (without other video
+files), and the alphabetical ordering of file names is assumed to match the
+chronological ordering of the video files. Example:
+
+    vidtransgeotag.merge_videos_in_directory(
+        input_video_dir, 
+        merged_video_path)
+
+By default the videos are merged without transcoding, which is fast and lossless.
+However, the merged file can be quite big. It is possible to transcode and compress the
+video while merging, although this will be much slower:
+
+    vidtransgeotag.merge_videos_in_directory(
+        input_video_dir, 
+        merged_video_path,
+        compress_by_transcoding=True)
+
 
