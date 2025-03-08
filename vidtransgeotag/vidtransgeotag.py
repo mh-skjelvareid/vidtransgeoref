@@ -256,7 +256,7 @@ class VidTransGeoTag:
         # Find EPSG code for UTM zone if not provided
         if epsg is None:
             # Calculate centroid of all points
-            centroid = gdf.geometry.unary_union.centroid
+            centroid = gdf.geometry.union_all().centroid
             # Use pyproj to find best UTM projection
             proj_string = pyproj.database.query_utm_crs_info(  # type: ignore
                 datum_name="WGS 84",
@@ -270,14 +270,14 @@ class VidTransGeoTag:
             epsg = proj_string[0].code
 
         # Convert to geomety suited to measure distance, e.g. UTM
-        geom = gdf.geometry.to_crs(epsg=epsg)
+        geom = gdf.geometry.to_crs(epsg=epsg)  # type: ignore
 
         # Iterate over all positions, and only include a new point if position
         # has changed more than sample_distance
         mask = [0]  # Always include first point
         last_pos = geom.iloc[0]  # Position at first point
         for index, position in enumerate(geom):
-            dist = position.distance(last_pos)
+            dist = position.distance(last_pos)  # type: ignore
             if (dist > min_distance) and (dist < outlier_distance):
                 mask.append(index)
                 last_pos = position
