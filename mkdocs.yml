@@ -1,5 +1,5 @@
-site_name: MassiPipe Documentation
-site_description: MassiPipe - a data processing pipeline for hyperspectral data acquired in the Massimal project.
+site_name: VidTransGeoRef Documentation
+site_description: VidTransGeoRef is a Python package for geotagging video files using GPS data logs
 
 theme:
   name: "material"
@@ -24,7 +24,7 @@ plugins:
 
 nav:
   - Introduction: index.md
-
+  - API Documentation: api.md
 
 markdown_extensions:
   - toc:
