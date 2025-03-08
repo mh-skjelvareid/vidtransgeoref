@@ -1,6 +1,11 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14974704.svg)](https://doi.org/10.5281/zenodo.14974704)
+
 # vidtransgeotag
-Tools for generating geotagged ground truth images by merging video and
-geolocation data streams.
+Tools for generating geotagged ground truth images by merging video and geolocation data
+streams.
+
+# Documentation
+[VidTransGeoTag documentation](https://mh-skjelvareid.github.io/vidtransgeotag/).
 
 ## Dependencies
 The module requires the binaries FFMPEG and ExifTool to be installed on your system. The
